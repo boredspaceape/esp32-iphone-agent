@@ -207,3 +207,123 @@ extension AppModel {
         }
     }
 }
+
+// MARK: - Remote tasks (fork: an outside agent sends a task, the app runs it and posts the answer back)
+
+/// Uses the same endpoint URL and token as the remote debug log (Settings › Developer › Remote debug log, or the
+/// `remote-debug-log.json` drop), so there is no new settings screen. Off when they're empty.
+/// Server API, on top of docs/remote-debug-log.md:
+///   POST <url>/task    `{}` → `{"task": {"id": "t1", "text": "open Notes and write hello"}}` or `{}` (nothing queued)
+///   POST <url>/result  `{"id", "outcome": "done|failed|stopped|not_started", "answer", "steps", "seconds", "run"}` → 200
+/// The task is run unattended (RunPolicy.unattended): risky steps are never approved on their own.
+@MainActor final class RemoteTasks {
+    static let shared = RemoteTasks()
+    static let interval: UInt64 = 15_000_000_000
+    static let pendingKey = "remoteTaskPending"   // survives a relaunch mid-run, so the result still goes back
+
+    var transport: RemoteLogTransport = URLSessionRemoteLogTransport()
+    var config: () -> RemoteLogConfig = { RemoteLogConfig.load() }
+    private var lastError = ""
+
+    var pending: String? {
+        get { UserDefaults.standard.string(forKey: Self.pendingKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.pendingKey) }
+    }
+
+    struct Queued: Decodable { var id: String; var text: String }
+
+    /// One poll. Returns the queued task, if any; no network when not configured.
+    func next() async -> Queued? {
+        guard let base = config().endpoint else { return nil }
+        do {
+            let (data, status) = try await transport.send(request(base, "task", body: Data("{}".utf8)))
+            guard status == 200 else { throw URLError(.badServerResponse) }
+            struct Reply: Decodable { var task: Queued? }
+            lastError = ""
+            return try JSONDecoder().decode(Reply.self, from: data).task
+        } catch {
+            let line = "\(error)"
+            if line != lastError { DebugLog.write("remote task: poll failed: \(line.prefix(120))") }
+            lastError = line
+            return nil
+        }
+    }
+
+    /// Posts a result, retrying a few times (cellular on the board hotspot can drop for a moment).
+    func report(_ id: String, outcome: String, answer: String, steps: Int = 0, seconds: Int = 0, run: String = "") async {
+        guard let base = config().endpoint else { return }
+        let body: [String: Any] = ["id": id, "outcome": outcome, "answer": answer, "steps": steps, "seconds": seconds, "run": run]
+        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
+        for attempt in 0..<5 {
+            if let (_, status) = try? await transport.send(request(base, "result", body: data)), status == 200 {
+                DebugLog.write("remote task: result sent for \(id) (\(outcome))")
+                if pending == id { pending = nil }
+                return
+            }
+            try? await Task.sleep(nanoseconds: UInt64(5 + attempt * 10) * 1_000_000_000)
+        }
+        DebugLog.write("remote task: could not send the result for \(id); kept for the next poll")
+    }
+
+    private func request(_ base: URL, _ path: String, body: Data) -> URLRequest {
+        var r = URLRequest(url: base.appendingPathComponent(path), timeoutInterval: 20)
+        r.httpMethod = "POST"
+        r.httpBody = body
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.setValue("Bearer " + config().token.trimmingCharacters(in: .whitespacesAndNewlines), forHTTPHeaderField: "Authorization")
+        return r
+    }
+}
+
+extension AppModel {
+    /// Polls for a task every 15 s while nothing runs. Unlike the log channel it also polls in the background
+    /// while the board is connected: the board's 1 s BLE status heartbeat (bluetooth-central background mode)
+    /// is what keeps this process alive then, the same thing that keeps a run alive. A suspended app just skips.
+    func startRemoteTasks() {
+        Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.remoteTaskTick()
+                try? await Task.sleep(nanoseconds: RemoteTasks.interval)
+            }
+        }
+    }
+
+    private func remoteTaskTick() async {
+        let remote = RemoteTasks.shared
+        guard remote.config().endpoint != nil else { return }
+        if let stale = remote.pending, !agent.running, !startingAgent {
+            // a run that ended while the result couldn't be sent, or a process that ended mid-run
+            let last = runs.runs.first { !$0.id.hasPrefix("rec-") && !$0.steps.isEmpty }
+            let answer = last?.steps.last.map { $0.action["answer"]?.str ?? $0.action["reason"]?.str ?? "" } ?? ""
+            await remote.report(stale, outcome: "unknown", answer: answer)
+            remote.pending = nil
+            return
+        }
+        guard !agent.running, !startingAgent, !recorder.busy, !calibrator.busy,
+              !isBackground() || board.connected else { return }
+        guard let task = await remote.next() else { return }
+        DebugLog.write("remote task: \(task.id) received")
+        remote.pending = task.id
+        let said = await handle(.runTask(task.text, unattended: true))
+        if !agent.running {  // did not start: say why (not calibrated, mirroring off, …)
+            remote.pending = nil
+            await remote.report(task.id, outcome: "not_started", answer: said)
+        }
+    }
+
+    /// From ended(): the finished run's answer goes back to whoever queued the task.
+    func reportRemoteTask(outcome: Outcome, last: JObject?, seconds: Double) {
+        guard let id = RemoteTasks.shared.pending else { return }
+        let answer = last?["answer"]?.str ?? last?["message"]?.str ?? last?["reason"]?.str ?? ""
+        let name: String
+        switch outcome {
+        case .done: name = "done"
+        case .failed: name = "failed"
+        case .stopped: name = "stopped"
+        case .running: name = "running"
+        }
+        let steps = moveCount, run = runID
+        Task { await RemoteTasks.shared.report(id, outcome: name, answer: answer, steps: steps, seconds: Int(seconds), run: run) }
+    }
+}

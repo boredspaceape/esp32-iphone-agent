@@ -219,6 +219,7 @@ import UIKit
         startHarnessLink()
         #endif
         startRemoteLog()  // off (no network) until an endpoint and token are set: RemoteLog.swift
+        startRemoteTasks()  // fork: tasks from an outside agent, same endpoint and token (RemoteLog.swift)
         settingsSink = settings.$configurationRevision.dropFirst().sink { [weak self] _ in
             self?.modelOK = nil
             self?.modelError = nil

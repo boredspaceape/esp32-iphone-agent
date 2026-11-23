@@ -449,6 +449,7 @@ extension AppModel {
         if outcome == .done, let answer = last?["answer"]?.str ?? last?["message"]?.str, !answer.isEmpty {
             board.commands.sendAnswer(answer)  // a StopWatch shows it (StopWatchUI); other boards: nothing
         }
+        reportRemoteTask(outcome: outcome, last: last, seconds: seconds)  // fork: the answer back to the sender
         runs.reload()
         let summary = String(localized: "\(moveCount) steps · \(seconds.durationText)")
         switch outcome {
