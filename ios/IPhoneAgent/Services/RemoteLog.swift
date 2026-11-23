@@ -338,6 +338,11 @@ struct RemoteTaskConfig: Equatable {
         return r
     }
 
+    /// Added to every remote task: a question is answered by looking, not by changing things (2026-11-23: "tell me
+    /// the battery percentage" turned the Battery Percentage switch on).
+    static let readOnlyNote = "\n\n(Sent remotely. If this asks for information, only look and report it in your final answer; "
+        + "don't change settings, send, buy or delete anything unless the task says to.)"
+
     static func name(_ outcome: Outcome) -> String {
         switch outcome {
         case .done: return "done"
@@ -389,32 +394,32 @@ extension AppModel {
         guard remoteIdle else {  // the user started something while the poll was out
             return await remote.report(task.id, outcome: "not_started", answer: "The phone was busy.")
         }
-        let before = runID
         remoteRunStarting = task.id
-        let said = await handle(.runTask(text, unattended: true))
+        let said = await handle(.runTask(text + RemoteTasks.readOnlyNote, unattended: true))
         remoteRunStarting = nil
-        // Ours only if a new run is going with this task, started unattended (a run the user started during
-        // the readiness wait has launchUnattended false or other text).
-        if agent.running, agent.task == text, launchUnattended, runID != before, !runID.isEmpty {
-            if remote.pending == nil, !remoteRunEnded.contains(task.id) { remote.pending = .init(id: task.id, run: runID) }
-            remoteRunEnded.remove(task.id)
-        } else if remoteRunEnded.remove(task.id) == nil {
-            await remote.report(task.id, outcome: "not_started", answer: said)
-        }
+        remoteClaim = nil
+        // Started: claimRemoteRun() saved {id, run} when the agent started; ended() reports the real result.
+        if remoteRunsStarted.remove(task.id) != nil { return }
+        // Never started. `said` is the reason ("Could not start: …"); a run going now is someone else's.
+        await remote.report(task.id, outcome: "not_started",
+                            answer: agent.running ? "The phone was busy with another run." : said)
+    }
+
+    /// From startAgent, right after the agent started: the run this remote task started, by its run ID.
+    func claimRemoteRun() {
+        guard let id = remoteClaim else { return }
+        remoteClaim = nil
+        RemoteTasks.shared.pending = .init(id: id, run: runID)
+        remoteRunsStarted.insert(id)
+        DebugLog.write("remote task: \(id) runs as \(runID)")
     }
 
     /// From ended(): the finished run's answer goes back to whoever queued it, only if this is that task's run.
     func reportRemoteTask(outcome: Outcome, last: JObject?, seconds: Double) {
         let remote = RemoteTasks.shared
         let id: String
-        if let p = remote.pending, p.run == runID {
-            id = p.id
-        } else if let starting = remoteRunStarting, launchUnattended, remote.pending == nil {
-            // ended before the start returned (very short run): persist it now, tick() sees remoteRunEnded
-            id = starting
-            remote.pending = .init(id: id, run: runID)
-            remoteRunEnded.insert(id)
-        } else { return }
+        guard let p = remote.pending, !p.run.isEmpty, p.run == runID else { return }
+        id = p.id
         let answer = last?["answer"]?.str ?? last?["message"]?.str ?? last?["reason"]?.str ?? ""
         let steps = moveCount, run = runID
         guard !remote.reporting.contains(id) else { return }

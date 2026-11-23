@@ -21,6 +21,7 @@ extension AppModel {
         if Calls.isCall(task, kind: intent?.kind), CallGuide.shared.holds(task, intent: intent) { return }  // a call: the setup guide first, until Don't Show Again
         currentIntent = intent
         launchUnattended = unattended
+        remoteClaim = unattended ? remoteRunStarting : nil  // fork: only the remote poller's own start claims the run
         var task = task, resume = false
         if ChatContext.isContinue(task), let last = threads.current.turns.last {  // "continue": the last task, from where it stopped
             task = last.ask
@@ -268,6 +269,7 @@ extension AppModel {
             step = .agentStart
             try validateRunGeometry()
             try agent.start(task, traceStarted: true, resume: resume)
+            claimRemoteRun()  // fork: a remote task's run is tied to it by run ID here, before it can end
             RunMarker.set("running")
             usedInput = false  // The running agent now owns cleanup.
             mark("agent started")

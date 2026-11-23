@@ -121,7 +121,8 @@ import UIKit
     var launchUnattended = false
     /// Fork remote tasks (RemoteLog.swift): the id whose start is in progress, and ids whose run ended before it returned.
     var remoteRunStarting: String?
-    var remoteRunEnded: Set<String> = []
+    var remoteClaim: String?             // the remote id the run being started belongs to (set in run())
+    var remoteRunsStarted: Set<String> = []  // remote ids whose run really started (claimRemoteRun)
     /// Set when protected data becomes unavailable. A passcode is never typed; the run waits.
     var phoneLocked = false
     var currentIntent: SavedTask?
