@@ -1,0 +1,39 @@
+name: Unsigned IPA (for SideStore / iloader)
+
+# Run by hand only (Actions › Unsigned IPA › Run workflow, pick the branch). Manina (IA_TRIAL_ORIGIN) and PostHog are
+# compiled out. Builds the app without signing; SideStore or iloader
+# signs it with your own Apple ID when it installs it. Download the "ipa" artifact from the run page.
+on:
+  workflow_dispatch:  # manual only: a push never publishes an installable app file
+
+permissions:
+  contents: read
+
+jobs:
+  ipa:
+    runs-on: macos-26
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v5
+      - name: Archive (unsigned, device)
+        run: |
+          xcodebuild archive -scheme IPhoneAgent -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            IA_BUNDLE_ID=com.example.phoneagent IA_APP_NAME="Phone Agent" \
+            IA_TRIAL_ORIGIN= IA_POSTHOG_KEY= IA_POSTHOG_HOST= IA_PRESET_BASE_URL= IA_PRESET_MODEL= IA_PRESET_KEY=
+      - name: Package IPA
+        run: |
+          cd "$RUNNER_TEMP"
+          mkdir -p Payload
+          cp -R App.xcarchive/Products/Applications/*.app Payload/
+          zip -qry PhoneAgent-unsigned.ipa Payload
+          ls -la PhoneAgent-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipa
+          path: ${{ runner.temp }}/PhoneAgent-unsigned.ipa
+          retention-days: 7
