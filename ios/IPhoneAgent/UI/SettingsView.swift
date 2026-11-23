@@ -210,6 +210,7 @@ struct DeveloperView: View {
             }
             #endif
             RemoteLogSection()
+            RemoteTasksSection()
             Section {
                 Picker("Phrase", selection: $language) {
                     ForEach(AudioTest.phrases.keys.sorted(), id: \.self) { Text(verbatim: SpeechLanguages.name($0)).tag($0) }

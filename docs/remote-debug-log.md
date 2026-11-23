@@ -36,3 +36,19 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -d '{}' https://logs.example.com/
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/plain; charset=utf-8" \
      -H "X-Request-Id: ab12cd34" --data-binary @tail.log https://logs.example.com/upload
 ```
+
+## Remote tasks (this fork)
+
+Separate from the debug log. Settings › Developer › Remote tasks has its own **Allow remote tasks** switch (off by
+default), server URL and token (Keychain account `remote-tasks-token`). The debug-log token and a dropped
+`remote-debug-log.json` never turn it on. When on, the app polls about every 15 s while nothing runs (also in the
+background while the board is connected), posts a local notification for each task, runs it unattended and posts
+the final answer back **unredacted**.
+
+| Route | Request | Reply |
+|---|---|---|
+| `POST <url>/task` | `Authorization: Bearer <token>`, body `{}` | `{"task": {"id": "t1", "text": "…"}}` or `{}`; id ≤ 64 chars of `A-Z a-z 0-9 - _` |
+| `POST <url>/result` | `{"id", "outcome": "done\|failed\|stopped\|not_started\|unknown", "answer", "steps", "seconds", "run"}` | `200` |
+
+"continue" and phone-call tasks are refused (`not_started`). A result is retried until the server answers 200.
+The server should give each task its own timeout: a task can be lost if the `/task` reply never arrives.

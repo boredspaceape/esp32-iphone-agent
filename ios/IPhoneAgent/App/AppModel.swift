@@ -119,6 +119,9 @@ import UIKit
     var helpWait: CheckedContinuation<AgentLoop.HelpChoice, Never>?
     /// Set by a shortcut's Unattended parameter for the run that is about to start.
     var launchUnattended = false
+    /// Fork remote tasks (RemoteLog.swift): the id whose start is in progress, and ids whose run ended before it returned.
+    var remoteRunStarting: String?
+    var remoteRunEnded: Set<String> = []
     /// Set when protected data becomes unavailable. A passcode is never typed; the run waits.
     var phoneLocked = false
     var currentIntent: SavedTask?
