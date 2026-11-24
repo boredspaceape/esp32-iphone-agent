@@ -192,6 +192,13 @@ enum AppNames {
         return table.first { row in (row + (localized[row[1]].map { Array($0.values) } ?? [])).contains { norm($0) == want } }
     }
 
+    /// fork: every name the table knows for `name`'s app (localized ones too), or just `name` when it does not
+    /// know it. The remote-task app blocklist matches on these (RemoteTaskGuard).
+    static func allNames(_ name: String) -> [String] {
+        guard let row = row(name) else { return [name] }
+        return row + (localized[row[1]].map { Array($0.values) } ?? [])
+    }
+
     /// The names the app's Home Screen label can have here (Chinese, English, the device language's), for reading
     /// Spotlight's results: on a Japanese iPhone "Notes" typed lists the app as メモ. Empty when the table does not
     /// know it.

@@ -43,7 +43,11 @@ Separate from the debug log. Settings › Developer › Remote tasks has its own
 default), server URL and token (Keychain account `remote-tasks-token`). The debug-log token and a dropped
 `remote-debug-log.json` never turn it on. When on, the app polls about every 15 s while nothing runs (also in the
 background while the board is connected), posts a local notification for each task, runs it unattended and posts
-the final answer back **unredacted**.
+the final answer back with known keys, tokens, IPs and long opaque strings removed (the debug log's redaction;
+anything else on screen can still be in it). A remote task can't `open` the apps in **Apps remote tasks can't
+open** (set on the phone only; default Messages, Mail, Photos, Wallet, Passwords), and the model is told not to
+use them. That is best-effort: a tap on a Home Screen icon by coordinates isn't caught, so keep the switch off
+unless you trust whoever holds the token.
 
 | Route | Request | Reply |
 |---|---|---|

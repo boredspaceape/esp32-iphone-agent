@@ -82,8 +82,36 @@ enum Actions {
         var acts = try lines.map(parseCommand).prefix(6).map { $0 }
         guard !acts.isEmpty else { throw ParseError(message: "no DO line in reply: \(text.prefix(200))") }
         acts = blindSafe(acts)
+        withAnswerTail(&acts, text)
         acts[0] = JObject([("thought", .str(thought ?? "")), ("thought_zh", .str(zh ?? ""))]).merging(acts[0])
         return acts
+    }
+
+    /// fork: a `done` (or `fail`) answer the model wrote over several lines (a list, markdown) kept only its DO line,
+    /// so a long answer came back as its first heading (2026-11-23, "### 1. Current Wallpaper"). When the reply's
+    /// last DO line is the batch's closing done/fail, the lines after it that are not THINK/ZH/DO join its answer.
+    static func withAnswerTail(_ acts: inout [JObject], _ text: String) {
+        guard let last = acts.indices.last, let name = acts[last]["action"]?.str, name == "done" || name == "fail",
+              let key = actions[name]?.first else { return }
+        let rows = text.components(separatedBy: .newlines)
+        let isDo = regex(#"^\s*DO\s*[:：]"#, multiline: true)
+        let isHead = regex(#"^\s*(THINK|ZH|DO)\s*[:：]"#, multiline: true)
+        func hit(_ r: NSRegularExpression, _ row: String) -> Bool {
+            r.firstMatch(in: row, range: NSRange(location: 0, length: (row as NSString).length)) != nil
+        }
+        guard let lastDo = rows.lastIndex(where: { hit(isDo, $0) }),
+              let lastName = (try? parseCommand(firstGroup(#"^\s*DO\s*[:：]\s*(.*?)\s*$"#, in: rows[lastDo], multiline: true) ?? ""))?["action"]?.str,
+              lastName == name else { return }
+        var tail: [String] = []
+        for row in rows[(lastDo + 1)...] {
+            if hit(isHead, row) { break }
+            tail.append(row)
+        }
+        let more = tail.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !more.isEmpty else { return }
+        let head = acts[last][key]?.str ?? ""
+        let quotes = CharacterSet(charactersIn: "\"").union(.whitespacesAndNewlines)
+        acts[last][key] = .str((head.isEmpty ? more : head + "\n" + more).trimmingCharacters(in: quotes))
     }
 
     /// The part of a batch that can run without a new look. `done` only counts on its own: after other actions the

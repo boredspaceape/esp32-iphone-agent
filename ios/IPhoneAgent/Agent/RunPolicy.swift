@@ -19,6 +19,8 @@ struct RunPolicy: Equatable {
     /// 429 per minute, 5xx and timeouts. 30 seconds, doubling, capped at 10 minutes.
     var backoffBase: Double = 30
     var backoffCap: Double = 600
+    /// fork: apps a remote task may not open (RemoteTaskGuard); empty for every other run.
+    var blockedApps: [String] = []
 
     static let attended = RunPolicy()
 

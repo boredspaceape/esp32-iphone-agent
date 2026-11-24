@@ -33,8 +33,11 @@ struct RemoteTasksSection: View {
     @State private var enabled = RemoteTaskConfig.load().enabled
     @State private var url = RemoteTaskConfig.load().url
     @State private var token = RemoteTaskConfig.load().token
+    @State private var blocked = RemoteTaskConfig.load().blockedApps.joined(separator: ", ")
 
-    private var config: RemoteTaskConfig { RemoteTaskConfig(enabled: enabled, url: url, token: token) }
+    private var config: RemoteTaskConfig {
+        RemoteTaskConfig(enabled: enabled, url: url, token: token, blockedApps: RemoteTaskGuard.parse(blocked))
+    }
 
     var body: some View {
         Section {
@@ -44,6 +47,9 @@ struct RemoteTasksSection: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             SecureField("Task token", text: $token)
+            TextField("Apps remote tasks can't open", text: $blocked, axis: .vertical)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled()
             HStack {
                 Text("Status")
                 Spacer()
@@ -52,7 +58,7 @@ struct RemoteTasksSection: View {
         } header: {
             Text("Remote tasks")
         } footer: {
-            Text("Lets whoever holds this token control this iPhone. When on, the app asks this server for a task about every 15 seconds while nothing runs, runs it unattended, and sends the run's final answer back as written (it may include what was on screen). You get a notification for each task. Off by default; turn it off to stop.")
+            Text("Lets whoever holds this token control this iPhone. When on, the app asks this server for a task about every 15 seconds while nothing runs, runs it unattended, and sends the run's final answer back (it may include what was on screen; keys and tokens are removed). Remote tasks can't open the apps listed above (comma-separated; Messages, Mail, Photos, Wallet and Passwords by default), though this doesn't catch everything. You get a notification for each task. Off by default; turn it off to stop.")
         }
         .onValueChange(of: config) { config.save() }
     }

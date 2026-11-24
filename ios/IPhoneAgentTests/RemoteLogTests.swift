@@ -116,4 +116,53 @@ private final class FakeTransport: RemoteLogTransport {
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))  // deleted either way
         XCTAssertNil(defaults.string(forKey: RemoteLogConfig.urlKey))
     }
+
+    // MARK: fork: remote tasks
+
+    func testDoneAnswerKeepsItsFollowingLines() throws {
+        let reply = "THINK: Report it.\nDO: done ### 1. Current Wallpaper\n- Lock Screen: black\n- Home Screen: black\n\n### 2. Options\n- Color"
+        let acts = try Actions.parseActions(reply)
+        XCTAssertEqual(acts.count, 1)
+        XCTAssertEqual(acts[0]["answer"]?.str,
+                       "### 1. Current Wallpaper\n- Lock Screen: black\n- Home Screen: black\n\n### 2. Options\n- Color")
+    }
+
+    func testDoneAnswerTailStopsAtTheNextHeadAndDropsQuotes() throws {
+        let quoted = try Actions.parseActions("THINK: x\nDO: done \"Line one\nLine two\"")
+        XCTAssertEqual(quoted[0]["answer"]?.str, "Line one\nLine two")
+        let zh = try Actions.parseActions("THINK: x\nDO: done All set\nZH: 完成")
+        XCTAssertEqual(zh[0]["answer"]?.str, "All set")
+        let fail = try Actions.parseActions("THINK: x\nDO: fail Can't find it\nTried Settings and Search.")
+        XCTAssertEqual(fail[0]["reason"]?.str, "Can't find it\nTried Settings and Search.")
+        let tap = try Actions.parseActions("THINK: x\nDO: tap 500 300\nsome stray text")
+        XCTAssertEqual(tap[0]["action"]?.str, "tap")
+        XCTAssertNil(tap[0]["answer"])
+    }
+
+    func testRemoteTaskBlocklistMatchesAnyNameOfTheApp() {
+        let list = RemoteTaskGuard.defaultBlocked
+        XCTAssertEqual(RemoteTaskGuard.blocked("Messages", in: list), "Messages")
+        XCTAssertEqual(RemoteTaskGuard.blocked("imessage", in: list), "Messages")
+        XCTAssertEqual(RemoteTaskGuard.blocked("信息", in: list), "Messages")
+        XCTAssertEqual(RemoteTaskGuard.blocked("Mail", in: list), "Mail")
+        XCTAssertNil(RemoteTaskGuard.blocked("Settings", in: list))
+        XCTAssertNil(RemoteTaskGuard.blocked("Messages", in: []))
+        XCTAssertEqual(RemoteTaskGuard.parse(" Messages, mail,, Mail\nPhotos "), ["Messages", "mail", "Photos"])
+        XCTAssertNil(RemoteTaskGuard.hint([]))
+    }
+
+    func testRemoteTaskBlocklistIsSavedOnThePhone() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        XCTAssertEqual(RemoteTaskConfig.load(defaults).blockedApps, RemoteTaskGuard.defaultBlocked)  // default on
+        defaults.set([String](), forKey: RemoteTaskConfig.blockedKey)
+        XCTAssertEqual(RemoteTaskConfig.load(defaults).blockedApps, [])  // the owner may clear it
+    }
+
+    @MainActor func testRemoteAnswerIsRedacted() {
+        let config = RemoteTaskConfig(enabled: true, url: "https://q.example", token: "tok-1234567")
+        let out = RemoteTasks.redact("Token is tok-1234567 and " + String(repeating: "a", count: 48), config)
+        XCTAssertFalse(out.contains("tok-1234567"))
+        XCTAssertFalse(out.contains(String(repeating: "a", count: 48)))
+        XCTAssertEqual(RemoteTasks.redact("The battery is at 100%.", config), "The battery is at 100%.")
+    }
 }

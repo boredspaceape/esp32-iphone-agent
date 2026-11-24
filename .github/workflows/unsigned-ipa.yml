@@ -5,6 +5,15 @@ name: Unsigned IPA (for SideStore / iloader)
 # signs it with your own Apple ID when it installs it. Download the "ipa" artifact from the run page.
 on:
   workflow_dispatch:  # manual only: a push never publishes an installable app file
+    inputs:
+      bundle_id:
+        description: "Bundle id (keep the same one between builds, or the phone installs it as a separate app)"
+        required: true
+        default: com.example.phoneagent
+      app_name:
+        description: "Home Screen name"
+        required: true
+        default: Phone Agent
 
 permissions:
   contents: read
@@ -17,13 +26,17 @@ jobs:
       run:
         working-directory: ios
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
       - name: Archive (unsigned, device)
+        env:
+          BUNDLE_ID: ${{ inputs.bundle_id }}
+          APP_NAME: ${{ inputs.app_name }}
         run: |
+          [[ "$BUNDLE_ID" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || { echo "bad bundle_id"; exit 1; }
           xcodebuild archive -scheme IPhoneAgent -configuration Release \
             -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/App.xcarchive" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            IA_BUNDLE_ID=com.example.phoneagent IA_APP_NAME="Phone Agent" \
+            IA_BUNDLE_ID="$BUNDLE_ID" IA_APP_NAME="$APP_NAME" \
             IA_TRIAL_ORIGIN= IA_POSTHOG_KEY= IA_POSTHOG_HOST= IA_PRESET_BASE_URL= IA_PRESET_MODEL= IA_PRESET_KEY=
       - name: Package IPA
         run: |
@@ -32,7 +45,7 @@ jobs:
           cp -R App.xcarchive/Products/Applications/*.app Payload/
           zip -qry PhoneAgent-unsigned.ipa Payload
           ls -la PhoneAgent-unsigned.ipa
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: ipa
           path: ${{ runner.temp }}/PhoneAgent-unsigned.ipa

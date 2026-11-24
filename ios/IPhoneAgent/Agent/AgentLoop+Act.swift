@@ -135,6 +135,9 @@ extension AgentLoop {
             if a["keyOnly"]?.bool == true { try await phone.homeKey() } else { try await phone.goHome(again: homeAgain) }
         case "open":
             let app = a["app"]?.str ?? ""
+            if let blocked = RemoteTaskGuard.blocked(app, in: policy.blockedApps) {  // fork: remote-task blocklist
+                return ("result", "not opened: remote tasks can't open \(blocked) on this iPhone")
+            }
             if AlreadyOpen.holds(app, steps) { return ("opened", OpenResult.already.rawValue) }
             if HomeSwipeGuard.onHome(steps, startsOnHome: homeAtStart), try await tapHomeIcon(app) {
                 return ("opened", OpenResult.opened.rawValue)

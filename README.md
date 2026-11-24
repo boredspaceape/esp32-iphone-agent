@@ -202,6 +202,26 @@ Plug the board into the iPhone and open **ESP32 Agent**. Setup walks through fou
 Type a goal (for example *"Open Settings and go to Wi-Fi"*) and press **Start**. Stop it from the Dynamic Island,
 or come back to the app. Siri, Shortcuts, widgets and Control Center can run saved tasks.
 
+## Remote task queue (optional, this fork)
+
+This fork ([boredspaceape/esp32-iphone-agent](https://github.com/boredspaceape/esp32-iphone-agent), branch
+`remote-tasks`) adds a way for another agent to queue tasks for the phone. Everything else is
+**ESP32 iPhone Agent by Henry Yuan** ([onehumanbeing/esp32-iphone-agent](https://github.com/onehumanbeing/esp32-iphone-agent)),
+MIT; see [LICENSE](LICENSE) and [NOTICE](NOTICE). It is not part of upstream; please report fork bugs here, not there.
+
+- **Off by default.** Settings › Developer › Remote tasks › **Allow remote tasks** turns it on, with its own URL and
+  token (Keychain). The remote debug log's token can't send tasks.
+- When on, the app asks `POST https://YOUR_PROJECT_REF.supabase.co/functions/v1/phone-queue/task` with
+  `Authorization: Bearer YOUR_PHONE_TOKEN` about every 15 s while idle, shows a notification for each task, runs
+  it unattended and posts the answer to `/result` (keys and tokens removed). Remote tasks can't open the apps you
+  list on the phone (default Messages, Mail, Photos, Wallet, Passwords); this is best-effort, so only turn it on
+  if you trust whoever holds the token.
+- Server: [`server/phone-queue`](server/phone-queue) (a Supabase table + Edge Function, free tier). Make your own
+  tokens; the server stores only their SHA-256. App side and routes:
+  [`docs/remote-debug-log.md`](docs/remote-debug-log.md#remote-tasks-this-fork).
+- Unsigned IPA: Actions › **Unsigned IPA** › Run workflow, with your own `bundle_id` (keep it the same between
+  builds so a sideload updates in place). Nothing personal is stored in the workflow.
+
 ## Use from a coding agent
 
 The `esp32agent` CLI (npm, `npx -y esp32agent mcp`) is an MCP server, so a coding agent on your computer can see

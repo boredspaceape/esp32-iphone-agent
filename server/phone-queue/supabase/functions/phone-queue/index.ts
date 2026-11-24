@@ -9,7 +9,7 @@
 //   POST /poll {} -> {} and POST /upload -> ok   (the app's remote debug log, if pointed here)
 // Agent:
 //   POST /enqueue  {"text", "timeout_minutes"?} -> {"id"}
-//   POST /get      {"id"}                       -> the task row (status, answer, ...)
+//   POST /get      {"id"}                       -> the task row (status, answer, ..., late_outcome/late_answer if a result came after a timeout)
 //   POST /messages {}                           -> {"messages": [...]} unseen texts, then marked seen
 import { createClient } from "npm:@supabase/supabase-js@2";
 

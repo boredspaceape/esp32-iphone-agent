@@ -255,6 +255,12 @@ extension AppModel {
             }
             agent.policy = (launchUnattended || settings.unattendedMode)
                 ? .unattended(repairMirroring: MirrorSpots.load()?.validNow == true) : .attended
+            // fork: a remote task (starting, or resumed after a relaunch): the on-device app blocklist, told to the model too
+            let remoteRun = remoteClaim != nil || (!runID.isEmpty && RemoteTasks.shared.pending?.run == runID)
+            if remoteRun {
+                agent.policy.blockedApps = RemoteTaskConfig.load().blockedApps
+                if let hint = RemoteTaskGuard.hint(agent.policy.blockedApps) { agent.hints.append(hint) }
+            }
             agent.speculate = settings.speculativeLook
             // A run resumed after a relaunch has no list yet: without it the app's guide was gone from step one of the
             // resumed part (2026-11-18, a food-order run tapped shop names again after each Continue).
@@ -265,7 +271,7 @@ extension AppModel {
             agent.openedAtStart = openedAtStart  // or the scheme went straight to the task's app
             if !resume { agent.resultName = currentIntent?.name }  // names the folder the notes go to (LiveNotes)
             if !resume { pointer.forgetPosition() }  // the first gesture homes the pointer
-            if startedAway { agent.hints.insert(Self.hereHint, at: 0) }
+            if startedAway, !remoteRun { agent.hints.insert(Self.hereHint, at: 0) }  // fork: a remote task isn't about this screen
             step = .agentStart
             try validateRunGeometry()
             try agent.start(task, traceStarted: true, resume: resume)

@@ -217,28 +217,63 @@ extension AppModel {
 /// Server API:
 ///   POST <url>/task    `{}` → `{"task": {"id": "t1", "text": "open Notes and write hello"}}` or `{}` (nothing queued)
 ///   POST <url>/result  `{"id", "outcome": "done|failed|stopped|not_started|unknown", "answer", "steps", "seconds", "run"}` → 200
-/// Tasks run unattended (RunPolicy.unattended). The answer goes back as the run wrote it, not redacted.
+/// Tasks run unattended (RunPolicy.unattended) and may not open the apps in `blockedApps` (RemoteTaskGuard). The
+/// answer goes back with known keys, tokens and long opaque strings removed (RemoteLogRedaction.clean).
 struct RemoteTaskConfig: Equatable {
     var enabled = false
     var url = ""
     var token = ""
+    var blockedApps = RemoteTaskGuard.defaultBlocked
 
     static let enabledKey = "remoteTasksEnabled"
     static let urlKey = "remoteTasksURL"
     static let tokenAccount = "remote-tasks-token"
+    static let blockedKey = "remoteTasksBlockedApps"
 
     /// Where to poll, or nil = off: switched on, both set, https (the same checks as the debug log).
     var endpoint: URL? { enabled ? RemoteLogConfig(url: url, token: token).endpoint : nil }
 
     static func load(_ defaults: UserDefaults = .standard) -> Self {
         Self(enabled: defaults.bool(forKey: enabledKey), url: defaults.string(forKey: urlKey) ?? "",
-             token: Keychain.get(tokenAccount) ?? "")
+             token: Keychain.get(tokenAccount) ?? "",
+             blockedApps: defaults.stringArray(forKey: blockedKey) ?? RemoteTaskGuard.defaultBlocked)
     }
 
     func save(_ defaults: UserDefaults = .standard) {
         defaults.set(enabled, forKey: Self.enabledKey)
         defaults.set(url.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Self.urlKey)
         Keychain.set(token.trimmingCharacters(in: .whitespacesAndNewlines), for: Self.tokenAccount)
+        defaults.set(blockedApps, forKey: Self.blockedKey)
+    }
+}
+
+/// The on-device app blocklist for remote tasks (Tiko's review, must-fix 2): whoever holds the token can't have the
+/// phone read texts, mail, photos or passwords and send them back. Set on the phone only, never by the server.
+/// Enforced on `open` (Spotlight or the Home Screen icon) and told to the model; a tap on an icon by coordinates
+/// is not caught, so this narrows what a remote task does rather than sandboxing it.
+enum RemoteTaskGuard {
+    static let defaultBlocked = ["Messages", "Mail", "Photos", "Wallet", "Passwords"]
+
+    /// The blocked app that `app` names (any of its names, localized too), or nil.
+    static func blocked(_ app: String, in list: [String]) -> String? {
+        let want = AppNames.norm(app.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !want.isEmpty else { return nil }
+        return list.first { AppNames.allNames($0).contains { AppNames.norm($0) == want } }
+    }
+
+    /// "Messages, Mail" from the Settings field: trimmed, no empties or repeats.
+    static func parse(_ text: String) -> [String] {
+        var out: [String] = []
+        for part in text.split(whereSeparator: { $0 == "," || $0 == "\n" }) {
+            let name = part.trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty, !out.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) { out.append(name) }
+        }
+        return out
+    }
+
+    static func hint(_ list: [String]) -> String? {
+        list.isEmpty ? nil : "This task was sent remotely. Don't open or read these apps, and don't report anything "
+            + "from them: \(list.joined(separator: ", ")). If the task needs one, stop with fail and say so."
     }
 }
 
@@ -307,6 +342,7 @@ struct RemoteTaskConfig: Equatable {
             background = .invalid
         }
         defer { if background != .invalid { UIApplication.shared.endBackgroundTask(background) } }
+        let answer = Self.redact(answer, config)  // must-fix 2: never a key or token from this phone
         let body: [String: Any] = ["id": id, "outcome": outcome, "answer": answer, "steps": steps, "seconds": seconds, "run": run]
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
         for attempt in 0..<4 {
@@ -342,6 +378,13 @@ struct RemoteTaskConfig: Equatable {
     /// the battery percentage" turned the Battery Percentage switch on).
     static let readOnlyNote = "\n\n(Sent remotely. If this asks for information, only look and report it in your final answer; "
         + "don't change settings, send, buy or delete anything unless the task says to.)"
+
+    /// The answer as it may leave the phone: the debug log's redaction (known keys, both channels' tokens, IPs, long
+    /// opaque strings).
+    static func redact(_ answer: String, _ config: RemoteTaskConfig) -> String {
+        RemoteLogRedaction.clean(answer, secrets: RemoteLogRedaction.knownSecrets(RemoteLogConfig.load()) + [config.token]
+            .filter { $0.count >= 4 })
+    }
 
     static func name(_ outcome: Outcome) -> String {
         switch outcome {

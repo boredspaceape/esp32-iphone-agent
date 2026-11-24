@@ -18,7 +18,10 @@ create table if not exists phone_tasks (
   deadline    timestamptz not null default now() + interval '45 minutes',  -- overall: then marked failed
   created_at  timestamptz not null default now(),
   taken_at    timestamptz,
-  finished_at timestamptz
+  finished_at timestamptz,
+  late_outcome text,                            -- a result that came after the task was already timed out/stopped
+  late_answer  text,
+  late_at      timestamptz
 );
 
 create table if not exists phone_messages (
@@ -58,13 +61,24 @@ begin
   returning t.id, t.text;
 end $$;
 
--- A result from the phone. Accepted even after a timeout (a late answer beats none).
+-- A result from the phone. A task still queued/taken gets it as its status and answer. One already finished
+-- (timed out, stopped, or reported before) keeps its status; the result goes in late_* (a late answer beats
+-- none, but it must not turn "timed out" into "done"). True when the id exists.
 create or replace function finish_task(p_id text, p_outcome text, p_answer text, p_steps int, p_seconds int, p_run text)
 returns boolean
 language sql security definer set search_path = public as $$
-  update phone_tasks set status = left(coalesce(p_outcome, 'unknown'), 20), answer = left(coalesce(p_answer, ''), 20000),
-         steps = p_steps, seconds = p_seconds, run = left(p_run, 100), lease_until = null, finished_at = now()
-   where id = p_id
+  update phone_tasks t set
+         status      = case when t.status in ('queued', 'taken') then left(coalesce(p_outcome, 'unknown'), 20) else t.status end,
+         answer      = case when t.status in ('queued', 'taken') then left(coalesce(p_answer, ''), 20000) else t.answer end,
+         steps       = case when t.status in ('queued', 'taken') then p_steps else t.steps end,
+         seconds     = case when t.status in ('queued', 'taken') then p_seconds else t.seconds end,
+         run         = case when t.status in ('queued', 'taken') then left(p_run, 100) else t.run end,
+         finished_at = case when t.status in ('queued', 'taken') then now() else t.finished_at end,
+         late_outcome = case when t.status in ('queued', 'taken') then t.late_outcome else left(coalesce(p_outcome, 'unknown'), 20) end,
+         late_answer  = case when t.status in ('queued', 'taken') then t.late_answer else left(coalesce(p_answer, ''), 20000) end,
+         late_at      = case when t.status in ('queued', 'taken') then t.late_at else now() end,
+         lease_until = null
+   where t.id = p_id
   returning true;
 $$;
 
